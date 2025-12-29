@@ -3,8 +3,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { onboardingApi, type ProcessingStatus as ProcessingStatusType } from '@/lib/api'
+import { onboardingApi, type ProcessingStatus as ProcessingStatusType, type ClarificationAnswer } from '@/lib/api'
 import { ProcessingStatus } from '@/components/onboarding/ProcessingStatus'
+import { ClarificationQuestions } from '@/components/onboarding/ClarificationQuestions'
+import { ValidationErrors } from '@/components/onboarding/ValidationErrors'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Leaf, XCircle, Loader2, Check } from 'lucide-react'
@@ -16,10 +18,13 @@ export default function ProcessingPage() {
   const router = useRouter()
   const [status, setStatus] = useState<ProcessingStatusType | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showClarification, setShowClarification] = useState(false)
 
   // Poll for status
   useEffect(() => {
     if (!token) return
+    // Don't poll while showing clarification
+    if (showClarification) return
 
     let isMounted = true
     let pollTimeout: NodeJS.Timeout
@@ -31,8 +36,13 @@ export default function ProcessingPage() {
           setStatus(result)
           setError(null)
 
-          // Continue polling if not done
-          if (result.stage !== 'ready' && !result.error) {
+          // Continue polling if not done and not needing clarification
+          const shouldContinuePolling =
+            result.stage !== 'ready' &&
+            result.stage !== 'needs_clarification' &&
+            !result.error
+
+          if (shouldContinuePolling) {
             pollTimeout = setTimeout(pollStatus, POLL_INTERVAL)
           }
         }
@@ -49,7 +59,7 @@ export default function ProcessingPage() {
       isMounted = false
       clearTimeout(pollTimeout)
     }
-  }, [token])
+  }, [token, showClarification])
 
   const handleComplete = useCallback(() => {
     toast.success('¡Tu chatbot está listo!')
@@ -57,6 +67,55 @@ export default function ProcessingPage() {
   }, [router])
 
   const handleError = useCallback(() => {
+    router.push('/onboarding/upload')
+  }, [router])
+
+  // Show clarification UI when needed
+  const handleClarificationNeeded = useCallback(() => {
+    setShowClarification(true)
+  }, [])
+
+  // Submit clarification answers
+  const handleClarificationSubmit = useCallback(async (answers: ClarificationAnswer[]) => {
+    if (!token) return
+
+    try {
+      const result = await onboardingApi.submitClarificationAnswers(token, answers)
+      if (result.success) {
+        toast.success(result.improved
+          ? `Calidad mejorada: ${result.previousScore}% → ${result.newScore}%`
+          : 'Respuestas procesadas'
+        )
+        setShowClarification(false)
+        // Resume polling
+      } else {
+        toast.error('Error al procesar respuestas')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al enviar respuestas')
+    }
+  }, [token])
+
+  // Skip clarification
+  const handleClarificationSkip = useCallback(async () => {
+    if (!token) return
+
+    try {
+      const result = await onboardingApi.skipClarification(token)
+      if (result.success) {
+        if (result.warning) {
+          toast.warning(result.warning)
+        }
+        setShowClarification(false)
+        // Resume polling
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al omitir')
+    }
+  }, [token])
+
+  // Handle validation errors - go back to upload
+  const handleValidationReupload = useCallback(() => {
     router.push('/onboarding/upload')
   }, [router])
 
@@ -123,28 +182,48 @@ export default function ProcessingPage() {
           </div>
         ) : status ? (
           <div className="space-y-8">
-            <ProcessingStatus
-              status={status}
-              onComplete={handleComplete}
-              onError={handleError}
-            />
-            
-            {/* Cancel button - only show while processing */}
-            {status.stage !== 'ready' && !status.error && (
-              <div className="text-center">
-                <Button
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    if (confirm('¿Estás seguro de que quieres cancelar el procesamiento?')) {
-                      toast.info('Procesamiento cancelado')
-                      router.push('/onboarding/upload')
-                    }
-                  }}
-                >
-                  Cancelar y volver
-                </Button>
-              </div>
+            {/* Show validation errors if present */}
+            {status.validationErrors && status.validationErrors.length > 0 ? (
+              <ValidationErrors
+                errors={status.validationErrors}
+                warnings={status.validationWarnings}
+                onReupload={handleValidationReupload}
+              />
+            ) : showClarification && status.clarification ? (
+              /* Show clarification questions */
+              <ClarificationQuestions
+                clarification={status.clarification}
+                onSubmit={handleClarificationSubmit}
+                onSkip={handleClarificationSkip}
+              />
+            ) : (
+              /* Show normal processing status */
+              <>
+                <ProcessingStatus
+                  status={status}
+                  onComplete={handleComplete}
+                  onError={handleError}
+                  onClarificationNeeded={handleClarificationNeeded}
+                />
+
+                {/* Cancel button - only show while processing */}
+                {status.stage !== 'ready' && !status.error && status.stage !== 'needs_clarification' && (
+                  <div className="text-center">
+                    <Button
+                      variant="ghost"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        if (confirm('¿Estás seguro de que quieres cancelar el procesamiento?')) {
+                          toast.info('Procesamiento cancelado')
+                          router.push('/onboarding/upload')
+                        }
+                      }}
+                    >
+                      Cancelar y volver
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (

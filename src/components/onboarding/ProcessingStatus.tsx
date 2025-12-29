@@ -1,43 +1,79 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  Upload,
+  Search,
+  Hand,
+  Cog,
+  Brain,
+  CheckCircle,
+  Lightbulb,
+  PartyPopper,
+  XCircle,
+  AlertCircle,
+  ShieldCheck,
+  HelpCircle,
+  Check,
+  Circle,
+} from 'lucide-react'
 import type { ProcessingStatus as ProcessingStatusType, StageInfo } from '@/lib/api'
 
 interface ProcessingStatusProps {
   status: ProcessingStatusType
   onComplete: () => void
   onError: () => void
+  onClarificationNeeded?: () => void
 }
 
 const stageOrder = [
   'uploading',
+  'pre_validation',
   'analyzing_structure',
   'awaiting_confirmation',
   'processing_data',
   'semantic_analysis',
+  'needs_clarification',
   'validating_quality',
   'generating_examples',
   'ready',
 ]
 
-const stageIcons: Record<string, string> = {
-  uploading: '📤',
-  analyzing_structure: '🔍',
-  awaiting_confirmation: '✋',
-  processing_data: '⚙️',
-  semantic_analysis: '🧠',
-  validating_quality: '✅',
-  generating_examples: '💡',
-  ready: '🎉',
-  error: '❌',
+// Map stages to Lucide icons
+const stageIcons: Record<string, ReactNode> = {
+  uploading: <Upload className="h-12 w-12" />,
+  pre_validation: <ShieldCheck className="h-12 w-12" />,
+  analyzing_structure: <Search className="h-12 w-12" />,
+  awaiting_confirmation: <Hand className="h-12 w-12" />,
+  processing_data: <Cog className="h-12 w-12 animate-spin" />,
+  semantic_analysis: <Brain className="h-12 w-12" />,
+  needs_clarification: <HelpCircle className="h-12 w-12 text-amber-500" />,
+  validating_quality: <CheckCircle className="h-12 w-12" />,
+  generating_examples: <Lightbulb className="h-12 w-12" />,
+  ready: <PartyPopper className="h-12 w-12 text-green-500" />,
+  error: <XCircle className="h-12 w-12 text-destructive" />,
 }
 
-export function ProcessingStatus({ status, onComplete, onError }: ProcessingStatusProps) {
+// Small icons for stage list
+const stageIconsSmall: Record<string, ReactNode> = {
+  uploading: <Upload className="h-5 w-5" />,
+  pre_validation: <ShieldCheck className="h-5 w-5" />,
+  analyzing_structure: <Search className="h-5 w-5" />,
+  awaiting_confirmation: <Hand className="h-5 w-5" />,
+  processing_data: <Cog className="h-5 w-5" />,
+  semantic_analysis: <Brain className="h-5 w-5" />,
+  needs_clarification: <HelpCircle className="h-5 w-5" />,
+  validating_quality: <CheckCircle className="h-5 w-5" />,
+  generating_examples: <Lightbulb className="h-5 w-5" />,
+  ready: <PartyPopper className="h-5 w-5" />,
+}
+
+export function ProcessingStatus({ status, onComplete, onError, onClarificationNeeded }: ProcessingStatusProps) {
   const [dots, setDots] = useState('')
 
   // Animate dots
@@ -48,14 +84,16 @@ export function ProcessingStatus({ status, onComplete, onError }: ProcessingStat
     return () => clearInterval(interval)
   }, [])
 
-  // Check for completion only - don't auto-redirect on error
-  // Let user see the error message and click retry manually
+  // Check for completion, clarification needed, etc.
   useEffect(() => {
     if (status.stage === 'ready') {
       onComplete()
     }
-    // NOTE: Removed auto-redirect on error - the error UI will show instead
-  }, [status.stage, onComplete])
+    // Handle clarification stage
+    if (status.stage === 'needs_clarification' && onClarificationNeeded) {
+      onClarificationNeeded()
+    }
+  }, [status.stage, onComplete, onClarificationNeeded])
 
   const currentStageIndex = status.stage ? stageOrder.indexOf(status.stage) : 0
   const overallProgress = ((currentStageIndex + 1) / stageOrder.length) * 100
@@ -70,12 +108,13 @@ export function ProcessingStatus({ status, onComplete, onError }: ProcessingStat
       <Card className="w-full max-w-xl mx-auto border-destructive">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
-            <span>❌</span>
+            <XCircle className="h-5 w-5" />
             Error en el procesamiento
           </CardTitle>
         </CardHeader>
         <CardContent>
           <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
             <AlertTitle>Algo salio mal</AlertTitle>
             <AlertDescription>{errorMessage}</AlertDescription>
           </Alert>
@@ -90,7 +129,7 @@ export function ProcessingStatus({ status, onComplete, onError }: ProcessingStat
   return (
     <Card className="w-full max-w-xl mx-auto">
       <CardHeader className="text-center">
-        <div className="text-6xl mb-4">
+        <div className="flex justify-center mb-4 text-primary">
           {stageIcons[status.stage || 'uploading']}
         </div>
         <CardTitle className="text-xl">
@@ -141,8 +180,14 @@ export function ProcessingStatus({ status, onComplete, onError }: ProcessingStat
                   ${isPending ? 'text-muted-foreground/50' : ''}
                 `}
               >
-                <span className="text-lg">
-                  {isComplete ? '✓' : isCurrent ? stageIcons[stage] : '○'}
+                <span className="flex-shrink-0">
+                  {isComplete ? (
+                    <Check className="h-5 w-5 text-green-500" />
+                  ) : isCurrent ? (
+                    stageIconsSmall[stage]
+                  ) : (
+                    <Circle className="h-5 w-5" />
+                  )}
                 </span>
                 <span className={isCurrent ? 'font-medium' : ''}>
                   {getStageLabel(stage)}
@@ -185,10 +230,12 @@ export function ProcessingStatus({ status, onComplete, onError }: ProcessingStat
 function getStageLabel(stage: string): string {
   const labels: Record<string, string> = {
     uploading: 'Subiendo archivos',
+    pre_validation: 'Validando archivos',
     analyzing_structure: 'Analizando estructura',
     awaiting_confirmation: 'Esperando confirmación',
     processing_data: 'Procesando datos',
     semantic_analysis: 'Entendiendo tu negocio',
+    needs_clarification: 'Necesitamos más información',
     validating_quality: 'Validando calidad',
     generating_examples: 'Generando ejemplos',
     ready: 'Listo',

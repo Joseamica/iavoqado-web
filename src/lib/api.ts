@@ -149,6 +149,66 @@ export interface StageInfo {
   estimatedMinutes: number
 }
 
+// ============================================
+// Clarification Types
+// ============================================
+
+export interface ClarificationQuestionOption {
+  value: string
+  label: string
+  description?: string
+  icon?: string
+}
+
+export interface ClarificationQuestion {
+  id: string
+  type: 'business_context' | 'schema_validation' | 'terminology' | 'data_quality'
+  question: string
+  importance: 'critical' | 'high' | 'medium' | 'low'
+  options?: ClarificationQuestionOption[]
+  context?: {
+    columnName?: string
+    sampleValues?: string[]
+    suggestedAnswer?: string
+  }
+  createdAt: string
+}
+
+export interface ClarificationState {
+  needed: boolean
+  reason: 'low_quality_score' | 'low_confidence' | 'both'
+  questions: ClarificationQuestion[]
+  answeredCount: number
+  pendingCount: number
+  qualityScore?: number
+  llmConfidence?: number
+  skipped?: boolean
+}
+
+export interface ClarificationAnswer {
+  questionId: string
+  answer: string
+}
+
+// ============================================
+// Validation Types
+// ============================================
+
+export interface ValidationError {
+  fileId: string
+  fileName: string
+  errorType: 'corrupt' | 'empty' | 'no_headers' | 'schema_failed' | 'unsupported' | 'too_large'
+  message: string
+  suggestion: string
+}
+
+export interface ValidationWarning {
+  fileId: string
+  fileName: string
+  warningType: string
+  message: string
+}
+
 export interface ProcessingStatus {
   hasProcessing: boolean
   stateId?: string
@@ -164,6 +224,11 @@ export interface ProcessingStatus {
   qualityScore?: number
   error?: string | { stage?: string; message?: string; retryable?: boolean }
   message?: string
+  // Clarification support
+  clarification?: ClarificationState
+  // Validation support
+  validationErrors?: ValidationError[]
+  validationWarnings?: ValidationWarning[]
 }
 
 export interface ReadyStatus {
@@ -284,6 +349,47 @@ export const onboardingApi = {
       validatedQueries: number
       totalQueries: number
     }>('/onboarding/recalculate-quality', { method: 'POST', token }),
+
+  // ============================================
+  // Clarification API
+  // ============================================
+
+  // Get clarification questions
+  getClarificationQuestions: (token: string) =>
+    request<{
+      success: boolean
+      reason: 'low_quality_score' | 'low_confidence' | 'both'
+      qualityScore?: number
+      llmConfidence?: number
+      questions: ClarificationQuestion[]
+      pendingCount: number
+      answeredCount: number
+    }>('/onboarding/clarification/questions', { token }),
+
+  // Submit clarification answers
+  submitClarificationAnswers: (token: string, answers: ClarificationAnswer[]) =>
+    request<{
+      success: boolean
+      message: string
+      improved: boolean
+      previousScore?: number
+      newScore?: number
+      nextStage: string
+    }>('/onboarding/clarification/submit', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+      token,
+    }),
+
+  // Skip clarification
+  skipClarification: (token: string) =>
+    request<{
+      success: boolean
+      message: string
+      qualityScore?: number
+      warning?: string
+      nextStage: string
+    }>('/onboarding/clarification/skip', { method: 'POST', token }),
 }
 
 // ============================================
